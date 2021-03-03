@@ -18,13 +18,13 @@ The codes are currently written for a single object of interest per frame. They 
 
 ### 1. Preparation
 
-**Color** print the pdf with the correctly sized aruco markers in the arucomarkers folder. Affix the markers surrounding the object of interest, as shown in the picture.
+**Color** print the pdf with the correctly sized aruco markers (with ID 1-13) in the arucomarkers folder. Affix the markers surrounding the object of interest, as shown in the picture, make sure that you don't have markers with dulplicate IDS .
 
 ![BackFlow](doc/setup.png)
 
 ### 2. Record an object sequence
 
-#### Option 1: Record with a realsense camera
+#### Option 1: Record with a realsense camera (SR300 perfered)
 
 The script is provided to record an object video sequence using a compatible realsense camera. Use record.py for legacy models and record2.py for librealsense SDK 2.0:  
 
@@ -49,9 +49,9 @@ If you are using other cameras, please put color images (.jpg) in a folder named
 
 {"fx": 614.4744262695312, "fy": 614.4745483398438, "height": 480, "width": 640, "ppy": 233.29214477539062, "ppx": 308.8282470703125, "ID": "620201000292"}
 
-If you don't know your camera's intrinsic, you can put a rough estimation in. All parameters required are fx, fy, cx, cy, where commonly fx = fy and equals to the width of the image and cx and cy is the center of the image. For example, for a 640 x 480 resolution image, fx, fy = 480, cx = 320, cy = 240. 
+If you don't know your camera's intrinsic, you can put a rough estimation in. All parameters required are fx, fy, cx, cy, where commonly fx = fy and equals to the width of the image and cx and cy is the center of the image. For example, for a 640 x 480 resolution image, fx, fy = 640, cx = 320, cy = 240. 
 
-An example sequence can be download [HERE](https://drive.google.com/file/d/1qvKRW-jDPHSaJKkzttfXIoESN0O6Fksr/view?usp=sharing), create a directory named "LINEMOD", unzip the example sequence, and put the extracted folder (timer) under LINEMOD. 
+An example sequence can be download [HERE](https://drive.google.com/file/d/1BnW4OMR0UlIsaFAjeBuPWrbDgmqV-AY-/view?usp=sharing), create a directory named "LINEMOD", unzip the example sequence, and put the extracted folder (timer) under LINEMOD. 
 
 ### 3. Obtain frame transforms
 
@@ -66,22 +66,25 @@ python3 compute_gt_poses.py LINEMOD/sugar
 ```python
 python3 register_scene.py LINEMOD/sugar
 ```
-A raw registeredScene.ply will be saved under the specified directory (e.g., LINEMOD/sugar). The registeredScene.ply is a reconstruction of the scene that includes the table top, markers, and any other objects exposed during the scanning, with some level of noise removal. The generated mesh looks something like this:
+A raw registeredScene.ply will be saved under the specified directory (e.g., LINEMOD/sugar). The registeredScene.ply is a registered pointcloud of the scene that includes the table top, markers, and any other objects exposed during the scanning, with some level of noise removal. The generated mesh looks something like this and requires manual processing in step 5:
 
 ![BackFlow](doc/unsegmented.png)
 
-Alternatively, if you want to save some effort removing all the unwanted background, you can try creating the mesh with register_segmented instead of register_scene.
+Alternatively, you can try skipping all manual efforts by trying register_segmented instead of register_scene.
 
 ```python
 python3 register_segmented.py LINEMOD/sugar
 ```
+By default, register_segmented attempts to removes all unwanted backgrounds and performs surface reconstruction that converts the registered pointcloud into a triangular mesh. If MESHING is set to false, the script will only attempt to remove background and auto-complete the unseen bottom with a flat surface (If FILLBOTTOM is set to true), and you will need to do step 5.
 
-Register_segmented should be able to automatically removes all the unwanted background, and if enabled, auto complete the unseen bottom with flat surface. However, this script currently uses some ad hoc methods for segmenting the background, therefore you may need to tune some parameters for it to work with your object. The most important knob to tune is "MAX_RADIUS", which cuts off any depth reading whose Euclidean distance to the center of the aruco markers observed is longer than the value specified. This value is currently set at 0.2 m, if you have a larger object, you may need to increase this value to not cut off parts of your object. Result from running register_segmented looks something like this:
+However, register_segmented may fail as it uses some ad hoc methods for segmenting the background, therefore you may need to tune some parameters for it to work with your object. The most important knob to tune is "MAX_RADIUS", which cuts off any depth reading whose Euclidean distance to the center of the aruco markers observed is longer than the value specified. This value is currently set at 0.2 m, if you have a larger object, you may need to increase this value to not cut off parts of your object. Result from running register_segmented looks something like this:
 
 ![BackFlow](doc/segmented.png)
 
 
-### 5. Process the registered pointcloud manually
+### 5. Process the registered pointcloud manually (Optional)
+
+**(03/03/2019) You can skip step 5 if you are satisfied with the result from running register_segmented.**
 
 The registered pointcloud needs to be processed to 
 1) Remove background that is not of interest,
@@ -118,6 +121,14 @@ python3 create_label_files.py LINEMOD/sugar
 ```
 
 This step creates a new mesh named foldername.ply (e.g., sugar.ply) whose AABB is centered at the origin and are the same dimensions as the OBB. It also produces image masks (saved under mask), 4 x 4 homogenious transforms in regards to the new mesh (saved under transforms), as well as labels files (saved under labels) which are projections of the 3D bounding box of the object onto the 2D images. The mask files can be used for training and testing purposes for a deep learning project (e.g., mask-rcnn) 
+
+Inspect the correctness of the created 3D bounding boxes and masks visually by running:
+
+
+```python
+python inspectMasks.py LINEMOD/sugar
+```
+
 
 ### (Optional) Create additional files required by singleshotpose
 

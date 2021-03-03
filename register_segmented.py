@@ -7,9 +7,7 @@ Use with caution, this script uses ad hoc rules for segmentation
 import png
 import random
 import cv2.aruco as aruco
-# from open3d import statistical_outlier_removal
-# from open3d import *
-import open3d
+from open3d import *
 import numpy as np
 import cv2
 import os
@@ -45,7 +43,7 @@ inlier_Radius = voxel_Radius * 2.5
 N_Neighbours = K_NEIGHBORS
 
 FILLBOTTOM = True
-
+MESHING = True
 plane_equation = None
 
 def post_process(originals, voxel_Radius, inlier_Radius):
@@ -112,16 +110,15 @@ def load_pcds(path, downsample = True, interval = 1):
     global voxel_size, camera_intrinsics, plane_equation 
     pcds= []
     
-    for Filename in trange(len(glob.glob1(path+"JPEGImages","*.jpg"))//interval):
+    for Filename in trange(int(len(glob.glob1(path+"JPEGImages","*.jpg"))/interval)):
         img_file = path + 'JPEGImages/%s.jpg' % (Filename*interval)
         
         cad = cv2.imread(img_file)
         cad = cv2.cvtColor(cad, cv2.COLOR_BGR2RGB)
         depth_file = path + 'depth/%s.png' % (Filename*interval)
-        #reader = png.Reader(depth_file)
-        #pngdata = reader.read()
-        #depth = np.array(map(np.uint16, pngdata[2]))
-        depth = np.array(Image.open(depth_file))
+        reader = png.Reader(depth_file)
+        pngdata = reader.read()
+        depth = np.array(tuple(map(np.uint16, pngdata[2])))
         mask = depth.copy()
         depth = convert_depth_frame_to_pointcloud(depth, camera_intrinsics)
 
@@ -139,15 +136,14 @@ def load_pcds(path, downsample = True, interval = 1):
         # use statistical outlier remover to remove isolated noise from the scene
         distance2center = np.linalg.norm(depth - aruco_center, axis=2)
         mask[distance2center > MAX_RADIUS] = 0
-        source = open3d.PointCloud()
-        source.points = open3d.Vector3dVector(depth[mask>0])
-        source.colors = open3d.Vector3dVector(cad[mask>0])
-
-        cl,ind = open3d.statistical_outlier_removal(source,nb_neighbors=500, std_ratio=0.5)
-
+        source = geometry.PointCloud()
+        source.points = utility.Vector3dVector(depth[mask>0])
+        source.colors = utility.Vector3dVector(cad[mask>0])
+        cl, ind = source.remove_statistical_outlier(nb_neighbors=200,
+                                                    std_ratio=0.5)
         if downsample == True:
-            pcd_down = open3d.voxel_down_sample(cl, voxel_size = voxel_size)
-            open3d.estimate_normals(pcd_down, KDTreeSearchParamHybrid(radius = 0.002 * 2, max_nn = 30))
+            pcd_down = cl.voxel_down_sample(voxel_size = voxel_size)
+            pcd_down.estimate_normals(geometry.KDTreeSearchParamHybrid(radius = 0.002 * 2, max_nn = 30))
             pcds.append(pcd_down)
         else:
             pcds.append(cl)
@@ -236,20 +232,37 @@ if __name__ == "__main__":
         print("Load and segment frames")
         originals = load_pcds(path, downsample = False, interval = RECONSTRUCTION_INTERVAL)     
         for point_id in range(len(originals)):
-             originals[point_id].transform(Ts[RECONSTRUCTION_INTERVAL//LABEL_INTERVAL*point_id])
+             originals[point_id].transform(Ts[int(RECONSTRUCTION_INTERVAL/LABEL_INTERVAL)*point_id])
 
         print("Apply post processing")
         points, colors, vote = post_process(originals, voxel_Radius, inlier_Radius)
         points = points[vote>1]
         colors = colors[vote>1]
-
+ 
         if FILLBOTTOM:
              plane_norm = normalize(np.array(plane_equation[:3]))
              distance = point_to_plane2(points, plane_equation)
-             projections = np.subtract(points,
-                                      np.array([plane_norm*(i) for i in distance]))
+             projections = np.subtract(points, np.array([plane_norm*(i) for i in distance]))
+             grey = np.array([[150,150,150] for i in range(len(projections))])
              points = np.concatenate((points, projections), axis=0)
-             colors = np.concatenate((colors, colors), axis=0)
+             colors = np.concatenate((colors, grey), axis=0)
+
+
+        if MESHING:
+             # attempt segmentation
+              pcd = geometry.PointCloud()
+              pcd.points = utility.Vector3dVector(points)
+              pcd.colors = utility.Vector3dVector(colors/255)
+              pcd, _ = pcd.remove_statistical_outlier(20, 0.8)
+              pcd = pcd.voxel_down_sample(voxel_size=0.005)
+              pcd.estimate_normals(search_param=geometry.KDTreeSearchParamHybrid(radius=0.02, max_nn=30))
+              pcd.orient_normals_towards_camera_location(np.mean(np.array(pcd.points), axis = 0))
+              normals = np.negative(np.array(pcd.normals))
+              pcd.normals = utility.Vector3dVector(normals)          
+              mesh, _ = geometry.TriangleMesh.create_from_point_cloud_poisson(pcd, depth = 10, linear_fit = True)
+              io.write_triangle_mesh(path + 'registeredScene.ply', mesh)
+              print("Mesh saved")
+              exit()
 
         ply = Ply(points, colors)
         meshfile = path + 'registeredScene.ply'

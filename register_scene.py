@@ -107,28 +107,27 @@ def load_pcds(path, downsample = True, interval = 1):
     global voxel_size, camera_intrinsics 
     pcds= []
     
-    for Filename in trange(len(glob.glob1(path+"JPEGImages","*.jpg"))//interval):
+    for Filename in trange(int(len(glob.glob1(path+"JPEGImages","*.jpg"))/interval)):
         img_file = path + 'JPEGImages/%s.jpg' % (Filename*interval)
         # mask = cv2.imread(img_file, 0)
         
         cad = cv2.imread(img_file)
         cad = cv2.cvtColor(cad, cv2.COLOR_BGR2RGB)
         depth_file = path + 'depth/%s.png' % (Filename*interval)
-        #reader = png.Reader(depth_file)
-        #pngdata = reader.read()
-        #depth = np.array(map(np.uint16, pngdata[2]))
-        depth = np.array(Image.open(depth_file))
+        reader = png.Reader(depth_file)
+        pngdata = reader.read()
+        depth = np.array(tuple(map(np.uint16, pngdata[2])))
         mask = depth.copy()
         depth = convert_depth_frame_to_pointcloud(depth, camera_intrinsics)
 
 
-        source = PointCloud()
-        source.points = Vector3dVector(depth[mask>0])
-        source.colors = Vector3dVector(cad[mask>0])
+        source = geometry.PointCloud()
+        source.points = utility.Vector3dVector(depth[mask>0])
+        source.colors = utility.Vector3dVector(cad[mask>0])
 
         if downsample == True:
-            pcd_down = voxel_down_sample(source, voxel_size = voxel_size)
-            estimate_normals(pcd_down, KDTreeSearchParamHybrid(radius = 0.002 * 2, max_nn = 30))
+            pcd_down = source.voxel_down_sample(voxel_size = voxel_size)
+            pcd_down.estimate_normals(geometry.KDTreeSearchParamHybrid(radius = 0.002 * 2, max_nn = 30))
             pcds.append(pcd_down)
         else:
             pcds.append(source)
@@ -189,7 +188,7 @@ if __name__ == "__main__":
         print("Merge segments")
         originals = load_pcds(path, downsample = False, interval = RECONSTRUCTION_INTERVAL)     
         for point_id in range(len(originals)):
-            originals[point_id].transform(Ts[RECONSTRUCTION_INTERVAL//LABEL_INTERVAL*point_id])
+             originals[point_id].transform(Ts[int(RECONSTRUCTION_INTERVAL/LABEL_INTERVAL)*point_id])
 
         print("Apply post processing")
         points, colors, vote = post_process(originals, voxel_Radius, inlier_Radius)
